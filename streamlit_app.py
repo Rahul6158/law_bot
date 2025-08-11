@@ -15,32 +15,39 @@ def initialize_chatbot():
     db = FAISS.load_local("ipc_vector_db", embeddings, allow_dangerous_deserialization=True)
     db_retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 4})
 
-    prompt_template = """<s>[INST]You are a legal chatbot specializing in the Indian Penal Code (IPC). Your role is to provide accurate, concise, and professional answers strictly based on the user's query.
+    prompt_template = """<s>[INST]You are a legal chatbot specializing in the Indian Penal Code (IPC). Provide professional legal information with these strict guidelines:
 
-    Response Guidelines:
-    1. For queries about specific IPC sections (e.g., "What is IPC 302?"), provide:
-       **📜 Section [X] Details:**
-       - [Official title/name of section]
-       - [Detailed explanation]
-       - **💡 Example:** [Relevant example case]
+    For SCENARIO-BASED QUERIES (e.g., "What if someone..."):
+    <legal_analysis>
+    <summary>[Clear one-sentence summary]</summary>
+    <case_analysis>[Detailed legal analysis of the situation]</case_analysis>
+    <applicable_sections>
+    - [IPC Section X]: [Title/Purpose]
+    - [IPC Section Y]: [Title/Purpose]
+    </applicable_sections>
+    <consequences>
+    - [Possible outcome 1]
+    - [Possible outcome 2]
+    </consequences>
+    </legal_analysis>
 
-    2. For scenario-based queries (e.g., "A boy killed a lady..."), provide:
-       **📝 Case Analysis:**
-       - [Brief summary of the legal position]
-       
-       **⚖️ Relevant IPC Sections:**
-       - [Section X]: [Title/Description]
-       - [Section Y]: [Title/Description] (if multiple apply)
-       
-       **🔨 Legal Consequences:**
-       - [Possible punishment/outcome 1]
-       - [Possible punishment/outcome 2] (if multiple)
+    For SECTION EXPLANATIONS (e.g., "Explain IPC 302"):
+    <section_details>
+    <definition>[Official section title/definition]</definition>
+    <explanation>[Detailed explanation in simple terms]</explanation>
+    <example>[Practical case example]</example>
+    <related_sections>
+    - [Related Section A]: [Brief description]
+    - [Related Section B]: [Brief description]
+    </related_sections>
+    </section_details>
 
-    3. For greetings, respond politely but briefly.
-    4. For non-IPC questions, politely decline to answer.
-    5. Never include Q&A format in responses.
-    6. Never generate follow-up questions.
-    7. Always maintain professional tone.
+    Strict Rules:
+    1. NEVER include "Question:" or "Answer:" in responses
+    2. NEVER create hypothetical Q&A
+    3. For greetings: Brief polite response
+    4. For non-IPC queries: Polite redirection
+    5. Always maintain professional legal tone
 
     CONTEXT: {context}
     CHAT HISTORY: {chat_history}
@@ -67,106 +74,120 @@ def initialize_chatbot():
 
 qa = initialize_chatbot()
 
-def format_section_response(response_text):
-    """Special formatting for section queries"""
-    formatted = response_text
-    formatting_replacements = [
-        ("**📜 Section", "\n**📜 Section"),
-        ("**💡 Example:**", "\n**💡 Example:**\n"),
-        ("- ", "• "),
-        ("IPC Section", "**IPC Section**")
-    ]
-    for old, new in formatting_replacements:
-        formatted = formatted.replace(old, new)
-    return formatted
+def clean_response(text):
+    """Remove any Q&A patterns and clean the text"""
+    text = text.split("Question:")[0].split("QUESTION:")[0]
+    text = text.split("Answer:")[0].split("ANSWER:")[0]
+    return text.strip()
 
-def format_scenario_response(response_text):
-    """Special formatting for scenario-based queries"""
-    formatted = response_text
-    formatting_replacements = [
-        ("**📝 Case Analysis:**", "\n**📝 Case Analysis**\n"),
-        ("**⚖️ Relevant IPC Sections:**", "\n**⚖️ Relevant IPC Sections**\n"),
-        ("**🔨 Legal Consequences:**", "\n**🔨 Legal Consequences**\n"),
-        ("- ", "• "),
-        ("IPC Section", "**IPC Section**")
+def format_scenario_response(text):
+    """Format scenario-based answers"""
+    text = clean_response(text)
+    replacements = [
+        ("<legal_analysis>", "<div style='margin-bottom:20px'>"),
+        ("</legal_analysis>", "</div>"),
+        ("<summary>", "<h4 style='color:#2b5876; margin-bottom:10px'>Summary</h4><p>"),
+        ("</summary>", "</p>"),
+        ("<case_analysis>", "<h4 style='color:#2b5876; margin-bottom:10px'>Case Analysis</h4><p>"),
+        ("</case_analysis>", "</p>"),
+        ("<applicable_sections>", "<h4 style='color:#2b5876; margin-bottom:10px'>Applicable IPC Sections</h4><ul>"),
+        ("</applicable_sections>", "</ul>"),
+        ("<consequences>", "<h4 style='color:#2b5876; margin-bottom:10px'>Legal Consequences</h4><ul>"),
+        ("</consequences>", "</ul>"),
+        ("- ", "<li>"),
+        ("</li><li>", "</li><li>")
     ]
-    for old, new in formatting_replacements:
-        formatted = formatted.replace(old, new)
-    return formatted
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+def format_section_response(text):
+    """Format section explanation answers"""
+    text = clean_response(text)
+    replacements = [
+        ("<section_details>", "<div style='margin-bottom:20px'>"),
+        ("</section_details>", "</div>"),
+        ("<definition>", "<h4 style='color:#2b5876; margin-bottom:10px'>Section Definition</h4><p>"),
+        ("</definition>", "</p>"),
+        ("<explanation>", "<h4 style='color:#2b5876; margin-bottom:10px'>Detailed Explanation</h4><p>"),
+        ("</explanation>", "</p>"),
+        ("<example>", "<h4 style='color:#2b5876; margin-bottom:10px'>Practical Example</h4><p>"),
+        ("</example>", "</p>"),
+        ("<related_sections>", "<h4 style='color:#2b5876; margin-bottom:10px'>Related Sections</h4><ul>"),
+        ("</related_sections>", "</ul>"),
+        ("- ", "<li>"),
+        ("</li><li>", "</li><li>")
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
 
 def generate_response(user_query):
     greeting_keywords = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]
     thanks_keywords = ["thank", "thanks", "appreciate"]
-    section_keywords = ["section", "ipc", "what is"]
-    non_ipc_response = "I specialize only in the Indian Penal Code (IPC) matters. Please ask me about IPC sections or legal scenarios."
+    non_ipc_response = "I specialize in Indian Penal Code matters. Please ask about IPC sections or describe a legal scenario."
     
     if any(greeting in user_query.lower() for greeting in greeting_keywords):
-        return "Hello! I'm your IPC legal assistant. How can I help you with the Indian Penal Code today?"
+        return "Hello! I'm your IPC legal assistant. How may I assist you today?"
     elif any(thanks in user_query.lower() for thanks in thanks_keywords):
-        return "You're welcome! Let me know if you have other IPC-related questions."
+        return "You're welcome. For personal legal matters, consulting an advocate is recommended."
     elif "ipc" not in user_query.lower() and not any(term in user_query.lower() for term in ["section", "penal code", "law", "legal"]):
         return non_ipc_response
     else:
         try:
             result = qa.invoke(input=user_query)
-            raw_response = result["answer"]
+            raw_response = clean_response(result["answer"])
             
-            # Determine response type and format accordingly
+            # Add legal disclaimer
+            disclaimer = """
+            <div style='background-color:#f8f9fa; padding:12px; border-radius:6px; margin:15px 0; border-left:4px solid #dc3545;'>
+            <p style='font-size:0.9em; color:#555; margin:0;'>Note: This information is for general understanding only. For specific legal advice, please consult a qualified advocate.</p>
+            </div>
+            """
+            
             if any(keyword in user_query.lower() for keyword in ["what is section", "explain section", "meaning of section"]):
-                return format_section_response(raw_response)
+                return format_section_response(raw_response) + disclaimer
             elif "section" in user_query.lower() and ("what" in user_query.lower() or "explain" in user_query.lower()):
-                return format_section_response(raw_response)
+                return format_section_response(raw_response) + disclaimer
             else:
-                return format_scenario_response(raw_response)
+                return format_scenario_response(raw_response) + disclaimer
         except Exception as e:
             st.error(f"Error: {str(e)}")
-            return "I encountered an error processing your request. Please try again with a different question."
+            return "I encountered difficulty processing your query. Please try rephrasing your question."
 
 # Streamlit UI
-st.set_page_config(page_title="IPC Legal Chatbot", page_icon="⚖️")
-st.title("Indian Penal Code (IPC) Legal Assistant")
-st.caption("Ask me about specific IPC sections or describe a legal scenario for analysis")
+st.set_page_config(page_title="IPC Legal Advisor", page_icon="⚖️")
+st.title("Indian Penal Code Legal Advisor")
+st.caption("Get professional explanations of IPC sections and scenario analysis")
 
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.messages.append({
         "role": "assistant", 
-        "content": "Hello! I'm your IPC legal assistant. You can:\n\n• Ask about specific sections (e.g., 'Explain IPC 302')\n• Describe a scenario for legal analysis (e.g., 'What if someone...')"
+        "content": """<div style='padding:15px; background-color:#f5f9ff; border-radius:8px; border-left:4px solid #2b5876;'>
+                      <h4 style='color:#2b5876; margin-top:0'>How I Can Assist You:</h4>
+                      <p>• <b>Section Explanations</b>: "Explain IPC 302" or "What is Section 304?"</p>
+                      <p>• <b>Scenario Analysis</b>: Describe a situation for legal assessment</p>
+                      <p style='font-size:0.9em; color:#555; margin-bottom:0;'>Note: I provide general legal information, not personal advice.</p>
+                      </div>"""
     })
 
-# Display chat messages from history on app rerun
+# Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"], unsafe_allow_html=True)
 
-# Accept user input
-if prompt := st.chat_input("What is your legal question?"):
-    # Add user message to chat history
+# Chat input
+if prompt := st.chat_input("Describe your legal question..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
     
-    # Generate and display response
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing..."):
+        with st.spinner("Analyzing your query..."):
             response = generate_response(prompt)
-            
-            # Add disclaimer to legal responses only
-            if not any(keyword in prompt.lower() for keyword in ["hello", "hi", "hey", "thank", "thanks"]):
-                disclaimer = """
-                <div style='background-color:#f8f9fa; padding:10px; border-radius:5px; margin-bottom:15px; border-left:4px solid #dc3545;'>
-                <small>▲ Legal Disclaimer: This analysis is for informational purposes only and does not constitute legal advice.
-                For specific cases, please consult a qualified lawyer.</small>
-                </div>
-                """
-                full_response = f"{disclaimer}\n\n{response}"
-            else:
-                full_response = response
-            
-            st.markdown(full_response, unsafe_allow_html=True)
+            st.markdown(response, unsafe_allow_html=True)
     
-    # Add assistant response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+    st.session_state.messages.append({"role": "assistant", "content": response})
