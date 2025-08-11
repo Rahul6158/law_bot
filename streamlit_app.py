@@ -17,32 +17,30 @@ def initialize_chatbot():
 
     prompt_template = """<s>[INST]You are a legal chatbot specializing in the Indian Penal Code (IPC). Your role is to provide accurate, concise, and professional answers strictly based on the user's query.
 
-    Response Format:
-    For every relevant question, structure the answer as follows:
-
-    **Summary:**
-    [A brief, clear explanation directly addressing the user's query]
-
-    **Sections Applicable:**
-    - [IPC Section X]: [Title/Description]
-    - [IPC Section Y]: [Title/Description] (if multiple apply)
-
-    **Consequences:**
-    - [Punishment/Penalty 1]
-    - [Punishment/Penalty 2] (if multiple)
-
-    For section explanations:
-    **Section [X] Explanation:**
-    [Detailed explanation of the section]
-    **Example:** [Relevant example]
-
     Response Guidelines:
-    1. Only answer questions related to the Indian Penal Code.
-    2. Never generate follow-up questions or hypothetical scenarios.
-    3. If asked about a specific section, provide detailed explanation with example.
-    4. For greetings, respond politely but briefly and ask how you can assist with IPC.
-    5. For non-IPC questions, politely decline to answer.
-    6. Never include Q&A format in responses - only provide direct information.
+    1. For queries about specific IPC sections (e.g., "What is IPC 302?"), provide:
+       **📜 Section [X] Details:**
+       - [Official title/name of section]
+       - [Detailed explanation]
+       - **💡 Example:** [Relevant example case]
+
+    2. For scenario-based queries (e.g., "A boy killed a lady..."), provide:
+       **📝 Case Analysis:**
+       - [Brief summary of the legal position]
+       
+       **⚖️ Relevant IPC Sections:**
+       - [Section X]: [Title/Description]
+       - [Section Y]: [Title/Description] (if multiple apply)
+       
+       **🔨 Legal Consequences:**
+       - [Possible punishment/outcome 1]
+       - [Possible punishment/outcome 2] (if multiple)
+
+    3. For greetings, respond politely but briefly.
+    4. For non-IPC questions, politely decline to answer.
+    5. Never include Q&A format in responses.
+    6. Never generate follow-up questions.
+    7. Always maintain professional tone.
 
     CONTEXT: {context}
     CHAT HISTORY: {chat_history}
@@ -69,28 +67,73 @@ def initialize_chatbot():
 
 qa = initialize_chatbot()
 
-# Custom function to format the response with proper markdown
-def format_response(response_text):
-    # Remove any Q&A patterns that might have slipped through
-    response_text = response_text.split("Question:")[0].split("QUESTION:")[0]
+def format_section_response(response_text):
+    """Special formatting for section queries"""
+    formatted = response_text
+    formatting_replacements = [
+        ("**📜 Section", "\n**📜 Section"),
+        ("**💡 Example:**", "\n**💡 Example:**\n"),
+        ("- ", "• "),
+        ("IPC Section", "**IPC Section**")
+    ]
+    for old, new in formatting_replacements:
+        formatted = formatted.replace(old, new)
+    return formatted
+
+def format_scenario_response(response_text):
+    """Special formatting for scenario-based queries"""
+    formatted = response_text
+    formatting_replacements = [
+        ("**📝 Case Analysis:**", "\n**📝 Case Analysis**\n"),
+        ("**⚖️ Relevant IPC Sections:**", "\n**⚖️ Relevant IPC Sections**\n"),
+        ("**🔨 Legal Consequences:**", "\n**🔨 Legal Consequences**\n"),
+        ("- ", "• "),
+        ("IPC Section", "**IPC Section**")
+    ]
+    for old, new in formatting_replacements:
+        formatted = formatted.replace(old, new)
+    return formatted
+
+def generate_response(user_query):
+    greeting_keywords = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]
+    thanks_keywords = ["thank", "thanks", "appreciate"]
+    section_keywords = ["section", "ipc", "what is"]
+    non_ipc_response = "I specialize only in the Indian Penal Code (IPC) matters. Please ask me about IPC sections or legal scenarios."
     
-    # Enhance markdown formatting
-    formatted_response = response_text.replace("**Summary:**", "\n**📝 Summary**\n")
-    formatted_response = formatted_response.replace("**Sections Applicable:**", "\n**⚖️ Sections Applicable**\n")
-    formatted_response = formatted_response.replace("**Consequences:**", "\n**🔨 Consequences**\n")
-    formatted_response = formatted_response.replace("**Section", "\n**📜 Section")
-    formatted_response = formatted_response.replace("**Example:**", "\n**💡 Example:**")
-    
-    return formatted_response
+    if any(greeting in user_query.lower() for greeting in greeting_keywords):
+        return "Hello! I'm your IPC legal assistant. How can I help you with the Indian Penal Code today?"
+    elif any(thanks in user_query.lower() for thanks in thanks_keywords):
+        return "You're welcome! Let me know if you have other IPC-related questions."
+    elif "ipc" not in user_query.lower() and not any(term in user_query.lower() for term in ["section", "penal code", "law", "legal"]):
+        return non_ipc_response
+    else:
+        try:
+            result = qa.invoke(input=user_query)
+            raw_response = result["answer"]
+            
+            # Determine response type and format accordingly
+            if any(keyword in user_query.lower() for keyword in ["what is section", "explain section", "meaning of section"]):
+                return format_section_response(raw_response)
+            elif "section" in user_query.lower() and ("what" in user_query.lower() or "explain" in user_query.lower()):
+                return format_section_response(raw_response)
+            else:
+                return format_scenario_response(raw_response)
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+            return "I encountered an error processing your request. Please try again with a different question."
 
 # Streamlit UI
 st.set_page_config(page_title="IPC Legal Chatbot", page_icon="⚖️")
 st.title("Indian Penal Code (IPC) Legal Assistant")
-st.caption("Ask me anything about Indian Penal Code and I'll provide relevant sections and consequences")
+st.caption("Ask me about specific IPC sections or describe a legal scenario for analysis")
 
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
+    st.session_state.messages.append({
+        "role": "assistant", 
+        "content": "Hello! I'm your IPC legal assistant. You can:\n\n• Ask about specific sections (e.g., 'Explain IPC 302')\n• Describe a scenario for legal analysis (e.g., 'What if someone...')"
+    })
 
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
@@ -101,36 +144,29 @@ for message in st.session_state.messages:
 if prompt := st.chat_input("What is your legal question?"):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
-    # Display user message in chat message container
+    
+    # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
     
-    # Handle greetings and non-IPC questions
-    greeting_keywords = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]
-    if any(greeting in prompt.lower() for greeting in greeting_keywords):
-        response = "Hello! I'm your IPC legal assistant. How can I help you with the Indian Penal Code today?"
-    elif "ipc" not in prompt.lower() and not any(term in prompt.lower() for term in ["section", "penal code", "law", "legal"]):
-        response = "I specialize only in the Indian Penal Code (IPC) matters. Please ask me questions related to IPC sections, crimes, or legal consequences under Indian law."
-    else:
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            with st.spinner("Researching IPC..."):
-                try:
-                    result = qa.invoke(input=prompt)
-                    raw_response = result["answer"]
-                    formatted_response = format_response(raw_response)
-                    
-                    disclaimer = """<div style='background-color:#f8f9fa; padding:10px; border-radius:5px; margin-bottom:15px; border-left:4px solid #dc3545;'>
-                                    <small>▲ Note: This information is provided by an AI model for general reference only. 
-                                    For serious legal matters, please consult a qualified lawyer.</small>
-                                    </div>"""
-                    
-                    response = f"{disclaimer}\n\n{formatted_response}"
-                except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
-                    response = "I encountered an error while processing your request. Please try again with a different question or rephrase your query."
-    
-    # Display and store the response
+    # Generate and display response
     with st.chat_message("assistant"):
-        st.markdown(response, unsafe_allow_html=True)
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        with st.spinner("Analyzing..."):
+            response = generate_response(prompt)
+            
+            # Add disclaimer to legal responses only
+            if not any(keyword in prompt.lower() for keyword in ["hello", "hi", "hey", "thank", "thanks"]):
+                disclaimer = """
+                <div style='background-color:#f8f9fa; padding:10px; border-radius:5px; margin-bottom:15px; border-left:4px solid #dc3545;'>
+                <small>▲ Legal Disclaimer: This analysis is for informational purposes only and does not constitute legal advice.
+                For specific cases, please consult a qualified lawyer.</small>
+                </div>
+                """
+                full_response = f"{disclaimer}\n\n{response}"
+            else:
+                full_response = response
+            
+            st.markdown(full_response, unsafe_allow_html=True)
+    
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
