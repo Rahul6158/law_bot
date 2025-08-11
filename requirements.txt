@@ -9,3 +9,4 @@ langchain-fireworks
 einops
 langchain-community
 faiss-cpu
+langchain-together
