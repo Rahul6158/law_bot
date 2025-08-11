@@ -116,11 +116,48 @@ if prompt := st.chat_input("What is your legal question?"):
         st.markdown(prompt)
     
     # Display assistant response in chat message container
+    # Display assistant response in chat message container
     with st.chat_message("assistant"):
         with st.spinner("Researching IPC..."):
             result = qa.invoke(input=prompt)
-            response = "▲ Note: Information provided may be inaccurate.\n\n" + "".join(result["answer"])
-            st.markdown(response)
+            
+            # Extract the AI's answer
+            raw_answer = result["answer"]
+
+            # Ensure headings are highlighted and well spaced
+            response = f"""
+    <div style="font-size: 15px; line-height: 1.6;">
+    <p style="color: #d9534f; font-weight: bold;">▲ Note:</p> 
+    <p>Information provided by the AI model. Please consult a lawyer for serious legal matters.</p>
+
+    <h4 style="color:#0073e6;">Summary:</h4>
+    <p>{raw_answer.split("Sections Applicable:")[0].replace("Summary:", "").strip()}</p>
+
+    <h4 style="color:#28a745;">Sections Applicable:</h4>
+    <ul>
+    """
+            
+            # Parse IPC sections nicely if available
+            if "Sections Applicable:" in raw_answer:
+                sections_part = raw_answer.split("Sections Applicable:")[1].split("Consequences:")[0].strip()
+                for sec in sections_part.split("\n"):
+                    sec = sec.strip("-• ")
+                    if sec:
+                        response += f"<li>{sec}</li>"
+            response += "</ul>"
+
+            # Parse consequences
+            if "Consequences:" in raw_answer:
+                consequences_part = raw_answer.split("Consequences:")[1].strip()
+                response += f"""
+    <h4 style="color:#ff9800;">Consequences:</h4>
+    <p>{consequences_part}</p>
+    """
+
+            response += "</div>"
+
+            st.markdown(response, unsafe_allow_html=True)
     
     # Add assistant response to chat history
     st.session_state.messages.append({"role": "assistant", "content": response})
+
