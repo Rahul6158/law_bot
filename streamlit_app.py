@@ -15,66 +15,50 @@ def initialize_chatbot():
     db = FAISS.load_local("ipc_vector_db", embeddings, allow_dangerous_deserialization=True)
     db_retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 4})
 
-    prompt_template = """<s>[INST]You are a legal expert specializing in the Indian Penal Code (IPC). Provide professional legal information in this format:
+    prompt_template = """<s>[INST]You are a legal expert specializing in the Indian Penal Code (IPC). Provide responses in this exact format:
 
-    For scenario questions (e.g., "What if someone..."):
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px">
-    <strong style="color:#2c3e50">📝 Summary</strong><br>
-    [Concise 1-2 sentence summary of the legal position]
-    </div>
+For scenario-based questions (e.g., "What if someone..."):
+SUMMARY:
+[Clear 1-2 sentence overview of the legal position]
 
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px">
-    <strong style="color:#2c3e50">🔍 Case Analysis</strong><br>
-    [Detailed analysis of the legal situation]
-    </div>
+CASE ANALYSIS:
+[Detailed analysis of the legal situation in clear paragraphs]
 
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px">
-    <strong style="color:#2c3e50">⚖️ Applicable IPC Sections</strong><br>
-    • <strong>Section [X]:</strong> [Title/Description]<br>
-    • <strong>Section [Y]:</strong> [Title/Description]
-    </div>
+APPLICABLE SECTIONS:
+• [Section X]: [Title/Description]
+• [Section Y]: [Title/Description]
 
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px">
-    <strong style="color:#2c3e50">🔨 Legal Consequences</strong><br>
-    • [Possible outcome 1]<br>
-    • [Possible outcome 2]
-    </div>
+CONSEQUENCES:
+• [Possible outcome 1]
+• [Possible outcome 2]
 
-    For section questions (e.g., "Explain IPC 302"):
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px">
-    <strong style="color:#2c3e50">📜 Section [X] Definition</strong><br>
-    [Official definition from IPC]
-    </div>
+For section explanations (e.g., "Explain IPC 302"):
+SECTION DEFINITION:
+[Official text of the section]
 
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px">
-    <strong style="color:#2c3e50">📖 Detailed Explanation</strong><br>
-    [Comprehensive explanation in simple terms]
-    </div>
+DETAILED EXPLANATION:
+[Comprehensive explanation in simple terms]
 
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px">
-    <strong style="color:#2c3e50">💡 Practical Example</strong><br>
-    [Relevant case example]
-    </div>
+EXAMPLE CASE:
+[Relevant case example with details]
 
-    <div style="background:#f8f9fa;padding:10px;border-radius:5px">
-    <strong style="color:#2c3e50">🔗 Related Sections</strong><br>
-    • <strong>Section [A]:</strong> [Brief description]<br>
-    • <strong>Section [B]:</strong> [Brief description]
-    </div>
+RELATED SECTIONS:
+• [Section A]: [Brief description]
+• [Section B]: [Brief description]
 
-    Rules:
-    1. Never include Q&A format in responses
-    2. Never generate follow-up questions
-    3. Always maintain professional tone
-    4. For non-IPC questions, respond: "I specialize in Indian Penal Code matters"
-    5. Remove any "Question:" or "Answer:" text from responses
+Rules:
+1. Never use code blocks or monospace
+2. Never include "Question:" or "Answer:" 
+3. Never generate follow-up questions
+4. Use proper spacing between sections
+5. Maintain professional legal tone
+6. For non-IPC questions, respond: "I specialize in Indian Penal Code matters"
 
-    CONTEXT: {context}
-    CHAT HISTORY: {chat_history}
-    QUESTION: {question}
-    ANSWER:
-    </s>[INST]
-    """
+CONTEXT: {context}
+CHAT HISTORY: {chat_history}
+QUESTION: {question}
+ANSWER:
+</s>[INST]"""
 
     prompt = PromptTemplate(template=prompt_template, input_variables=['context', 'question', 'chat_history'])
 
@@ -94,22 +78,32 @@ def initialize_chatbot():
 
 qa = initialize_chatbot()
 
-def clean_response(response_text):
-    """Remove any Q&A patterns and clean the response"""
-    # Remove any Question/Answer patterns
-    response_text = response_text.split("Question:")[0].split("QUESTION:")[0]
-    response_text = response_text.split("Answer:")[-1].split("ANSWER:")[-1]
+def enhance_response(response_text):
+    """Clean and format the response text"""
+    # Remove any Q/A patterns
+    response_text = response_text.split("Question:")[0].split("ANSWER:")[-1]
     
-    # Remove redundant section headers
-    response_text = response_text.replace("Summary:", "").replace("Case Analysis:", "")
+    # Enhance section headers
+    headers = {
+        "SUMMARY:": "📝 SUMMARY",
+        "CASE ANALYSIS:": "🔍 CASE ANALYSIS",
+        "APPLICABLE SECTIONS:": "⚖️ APPLICABLE SECTIONS",
+        "CONSEQUENCES:": "🔨 CONSEQUENCES",
+        "SECTION DEFINITION:": "📜 SECTION DEFINITION",
+        "DETAILED EXPLANATION:": "📖 DETAILED EXPLANATION",
+        "EXAMPLE CASE:": "💡 EXAMPLE CASE",
+        "RELATED SECTIONS:": "🔗 RELATED SECTIONS"
+    }
+    
+    for old, new in headers.items():
+        response_text = response_text.replace(old, f"\n\n<strong>{new}</strong>\n")
+    
+    # Convert dashes to proper bullet points
+    response_text = response_text.replace("- ", "• ")
+    
     return response_text.strip()
 
-def generate_response(user_query):
-    # Skip exception handling for legal scenarios as requested
-    result = qa.invoke(input=user_query)
-    return clean_response(result["answer"])
-
-# Streamlit UI
+# Streamlit UI Configuration
 st.set_page_config(page_title="IPC Legal Expert", page_icon="⚖️")
 st.title("Indian Penal Code (IPC) Legal Expert")
 st.caption("Get professional legal analysis of IPC sections and scenarios")
@@ -117,25 +111,19 @@ st.caption("Get professional legal analysis of IPC sections and scenarios")
 # Custom CSS for better styling
 st.markdown("""
 <style>
-    .legal-card {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 10px;
-        margin-bottom: 15px;
-        border-left: 4px solid #2c3e50;
-    }
-    .legal-header {
-        color: #2c3e50;
-        font-weight: 600;
-        margin-bottom: 10px;
-    }
-    .disclaimer {
+    .legal-disclaimer {
         background-color: #fff8e1;
         padding: 10px;
         border-radius: 5px;
         border-left: 4px solid #ffa000;
-        margin-top: 20px;
+        margin-top: 15px;
         font-size: 0.9em;
+    }
+    strong {
+        color: #2c3e50;
+    }
+    .chat-container {
+        padding-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -145,15 +133,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.messages.append({
         "role": "assistant", 
-        "content": """
-        <div class='legal-card'>
-            <div class='legal-header'>Welcome to IPC Legal Expert</div>
-            I can provide professional legal analysis of:<br><br>
-            • <strong>IPC Sections</strong> (e.g., "Explain Section 302")<br>
-            • <strong>Legal Scenarios</strong> (e.g., "What if someone...")<br><br>
-            Ask your legal question below.
-        </div>
-        """
+        "content": "Welcome to the IPC Legal Expert. You can ask about:\n\n• Specific IPC sections (e.g., 'Explain Section 302')\n• Legal scenarios (e.g., 'What if someone...')"
     })
 
 # Display chat messages
@@ -161,7 +141,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"], unsafe_allow_html=True)
 
-# Chat input
+# Chat input and processing
 if prompt := st.chat_input("Ask your legal question..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
@@ -169,16 +149,18 @@ if prompt := st.chat_input("Ask your legal question..."):
         st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing your legal query..."):
+        with st.spinner("Analyzing your query..."):
             if "ipc" not in prompt.lower() and not any(term in prompt.lower() for term in ["section", "penal code", "law", "legal"]):
                 response = "I specialize in Indian Penal Code matters. Please ask about IPC sections or legal scenarios."
             else:
-                response = generate_response(prompt)
-                response += """
-                <div class='disclaimer'>
-                <strong>Legal Disclaimer:</strong> This information is for general understanding only. For personal legal advice, please consult a qualified advocate.
+                result = qa.invoke(input=prompt)
+                response = enhance_response(result["answer"])
+                disclaimer = """
+                <div class='legal-disclaimer'>
+                <strong>Legal Disclaimer:</strong> This analysis is for informational purposes only and does not constitute legal advice. For specific cases, please consult a qualified advocate.
                 </div>
                 """
+                response += disclaimer
             
             st.markdown(response, unsafe_allow_html=True)
     
