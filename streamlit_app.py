@@ -5,129 +5,132 @@ from langchain.prompts import PromptTemplate
 from langchain_together import Together
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import ConversationalRetrievalChain
-import re
 
-# ------------------ Initialize Chatbot ------------------ #
+# Initialize the chatbot components
 @st.cache_resource
 def initialize_chatbot():
-    try:
-        # Load embeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="nomic-ai/nomic-embed-text-v1",
-            model_kwargs={"trust_remote_code": True,
-                          "revision": "289f532e14dbbbd5a04753fa58739e9ba766f3c7"}
-        )
+    embeddings = HuggingFaceEmbeddings(model_name="nomic-ai/nomic-embed-text-v1", 
+                                     model_kwargs={"trust_remote_code": True, 
+                                                  "revision": "289f532e14dbbbd5a04753fa58739e9ba766f3c7"})
+    db = FAISS.load_local("ipc_vector_db", embeddings, allow_dangerous_deserialization=True)
+    db_retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 4})
 
-        # Load FAISS database
-        db = FAISS.load_local("ipc_vector_db", embeddings, allow_dangerous_deserialization=True)
-        db_retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 4})
+    prompt_template = """<s>[INST]You are a legal chatbot specializing in the Indian Penal Code (IPC). Your role is to provide accurate, concise, and professional answers strictly based on the user's query.
 
-        # Prompt template
-        prompt_template = """
-You are a legal chatbot specializing in the Indian Penal Code (IPC).
+    Response Format:
+    For every relevant question, structure the answer as follows:
 
-📌 **Your Role:**
-- If the user greets (e.g., "Hi", "Hello"), greet back warmly and offer assistance.
-- If the query is related to IPC, answer using the structured format below.
-- If unrelated to IPC, respond with: 
-  "⚠️ I can only answer questions related to the Indian Penal Code (IPC)."
+    **Summary:**
+    [A brief, clear explanation directly addressing the user's query]
 
-📌 **Response Structure (for IPC queries):**
-**📄 Summary:**  
-A short, clear explanation answering the question.
+    **Sections Applicable:**
+    - [IPC Section X]: [Title/Description]
+    - [IPC Section Y]: [Title/Description] (if multiple apply)
 
-**📜 Sections Applicable:**  
-List relevant IPC sections by number & title in bullet points.
+    **Consequences:**
+    - [Punishment/Penalty 1]
+    - [Punishment/Penalty 2] (if multiple)
 
-**⚠️ Consequences:**  
-List punishments, penalties, or legal outcomes.
+    For section explanations:
+    **Section [X] Explanation:**
+    [Detailed explanation of the section]
+    **Example:** [Relevant example]
 
-📌 **Special Case:**
-If the question is like "What is Section X?", explain the section in plain words and give a real-life example.
+    Response Guidelines:
+    1. Only answer questions related to the Indian Penal Code.
+    2. Never generate follow-up questions or hypothetical scenarios.
+    3. If asked about a specific section, provide detailed explanation with example.
+    4. For greetings, respond politely but briefly and ask how you can assist with IPC.
+    5. For non-IPC questions, politely decline to answer.
+    6. Never include Q&A format in responses - only provide direct information.
 
-📌 **Rules:**
-- No Q&A style.
-- Keep language simple but accurate.
-- Always follow the structure above.
+    CONTEXT: {context}
+    CHAT HISTORY: {chat_history}
+    QUESTION: {question}
+    ANSWER:
+    </s>[INST]
+    """
 
-Context: {context}  
-Chat History: {chat_history}  
-Question: {question}  
-Answer:
-"""
+    prompt = PromptTemplate(template=prompt_template, input_variables=['context', 'question', 'chat_history'])
 
-        prompt = PromptTemplate(
-            template=prompt_template,
-            input_variables=['context', 'question', 'chat_history']
-        )
+    TOGETHER_AI_API = '488d9538dd3cfbf08816cca9ae559157f252c3daf6356eb4e10dd965ff589ddb'
+    llm = Together(model="mistralai/Mistral-7B-Instruct-v0.2", 
+                  temperature=0.5, 
+                  max_tokens=1024, 
+                  together_api_key=TOGETHER_AI_API)
 
-        # Together AI LLM
-        TOGETHER_AI_API = '488d9538dd3cfbf08816cca9ae559157f252c3daf6356eb4e10dd965ff589ddb'
-        llm = Together(
-            model="mistralai/Mistral-7B-Instruct-v0.2",
-            temperature=0.5,
-            max_tokens=1024,
-            together_api_key=TOGETHER_AI_API
-        )
+    qa = ConversationalRetrievalChain.from_llm(
+        llm=llm, 
+        memory=ConversationBufferWindowMemory(k=2, memory_key="chat_history", return_messages=True), 
+        retriever=db_retriever, 
+        combine_docs_chain_kwargs={'prompt': prompt}
+    )
+    return qa
 
-        # Conversational Retrieval Chain
-        qa = ConversationalRetrievalChain.from_llm(
-            llm=llm,
-            memory=ConversationBufferWindowMemory(k=2, memory_key="chat_history", return_messages=True),
-            retriever=db_retriever,
-            combine_docs_chain_kwargs={'prompt': prompt}
-        )
-        return qa
-
-    except Exception as e:
-        st.error(f"⚠️ Error initializing chatbot: {e}")
-        return None
-
-
-# ------------------ Streamlit App ------------------ #
 qa = initialize_chatbot()
 
-st.set_page_config(page_title="IPC Legal Chatbot", page_icon="⚖️")
-st.title("⚖️ Indian Penal Code (IPC) Legal Assistant")
-st.caption("Ask me anything about the Indian Penal Code — I'll provide relevant sections, consequences, and explanations.")
+# Custom function to format the response with proper markdown
+def format_response(response_text):
+    # Remove any Q&A patterns that might have slipped through
+    response_text = response_text.split("Question:")[0].split("QUESTION:")[0]
+    
+    # Enhance markdown formatting
+    formatted_response = response_text.replace("**Summary:**", "\n**📝 Summary**\n")
+    formatted_response = formatted_response.replace("**Sections Applicable:**", "\n**⚖️ Sections Applicable**\n")
+    formatted_response = formatted_response.replace("**Consequences:**", "\n**🔨 Consequences**\n")
+    formatted_response = formatted_response.replace("**Section", "\n**📜 Section")
+    formatted_response = formatted_response.replace("**Example:**", "\n**💡 Example:**")
+    
+    return formatted_response
 
-# Chat history
+# Streamlit UI
+st.set_page_config(page_title="IPC Legal Chatbot", page_icon="⚖️")
+st.title("Indian Penal Code (IPC) Legal Assistant")
+st.caption("Ask me anything about Indian Penal Code and I'll provide relevant sections and consequences")
+
+# Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
+# Display chat messages from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        st.markdown(message["content"], unsafe_allow_html=True)
 
-# User input
-if user_input := st.chat_input("What is your legal question?"):
+# Accept user input
+if prompt := st.chat_input("What is your legal question?"):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Display user message in chat message container
     with st.chat_message("user"):
-        st.markdown(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    try:
+        st.markdown(prompt)
+    
+    # Handle greetings and non-IPC questions
+    greeting_keywords = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]
+    if any(greeting in prompt.lower() for greeting in greeting_keywords):
+        response = "Hello! I'm your IPC legal assistant. How can I help you with the Indian Penal Code today?"
+    elif "ipc" not in prompt.lower() and not any(term in prompt.lower() for term in ["section", "penal code", "law", "legal"]):
+        response = "I specialize only in the Indian Penal Code (IPC) matters. Please ask me questions related to IPC sections, crimes, or legal consequences under Indian law."
+    else:
+        # Display assistant response in chat message container
         with st.chat_message("assistant"):
             with st.spinner("Researching IPC..."):
-                result = qa.invoke(input=user_input)
-                raw_answer = result.get("answer", "").strip()
-
-                # Add disclaimer at the top
-                response = (
-                    "ℹ️ **Note:** This information is provided by an AI model. For serious matters, please consult a licensed lawyer.\n\n"
-                    + raw_answer
-                )
-
-                # Improve heading formatting
-                response = re.sub(r"(?i)\bSummary\b", "**📄 Summary**", response)
-                response = re.sub(r"(?i)\bSections Applicable\b", "**📜 Sections Applicable**", response)
-                response = re.sub(r"(?i)\bConsequences\b", "**⚠️ Consequences**", response)
-
-                st.markdown(response)
-
-        st.session_state.messages.append({"role": "assistant", "content": response})
-
-    except Exception as e:
-        error_msg = f"⚠️ Unable to process your query right now: {e}"
-        st.error(error_msg)
-        st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                try:
+                    result = qa.invoke(input=prompt)
+                    raw_response = result["answer"]
+                    formatted_response = format_response(raw_response)
+                    
+                    disclaimer = """<div style='background-color:#f8f9fa; padding:10px; border-radius:5px; margin-bottom:15px; border-left:4px solid #dc3545;'>
+                                    <small>▲ Note: This information is provided by an AI model for general reference only. 
+                                    For serious legal matters, please consult a qualified lawyer.</small>
+                                    </div>"""
+                    
+                    response = f"{disclaimer}\n\n{formatted_response}"
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+                    response = "I encountered an error while processing your request. Please try again with a different question or rephrase your query."
+    
+    # Display and store the response
+    with st.chat_message("assistant"):
+        st.markdown(response, unsafe_allow_html=True)
+    st.session_state.messages.append({"role": "assistant", "content": response})
