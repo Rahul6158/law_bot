@@ -1,0 +1,12 @@
+Flask
+langchain
+langchain-community
+langchain-core
+langchain-together
+langchain-groq
+faiss-cpu
+langchain-groq
+'''
+pip uninstall langchain langchain-core -y
+pip install langchain==0.1.16 langchain-core==0.1.42
+'''
